@@ -24,23 +24,93 @@ async function run() {
     await client.connect();
     const coffeesCollection=client.db('coffeeDB').collection('coffees');
     const usersCollection=client.db('coffeeDB').collection('users');
+  const orderCollection =client.db('coffeeDB').collection('orders');
 
-  app.get('/coffees', async(req,res)=>{
-const cursor=coffeesCollection.find();
-const result= await cursor.toArray();
-res.send(result)
-  });
-  app.get('/coffees/:id',async(req,res)=>{
-    const id=req.params.id
-    const query={_id: new ObjectId(id)}
-    const result=await coffeesCollection.findOne(query)
-    res.send(result)
-  });
-app.post('/coffees',async(req,res)=>{
+  app.get('/coffees', async (req, res) => {
+      const allCoffees = await coffeesCollection.find().toArray()
+      console.log(allCoffees)
+      res.send(allCoffees)
+    });
+    // single coffee get
+    app.get('/coffee/:id',async(req,res)=>{
+      const id=req.params.id
+      const filter={_id: new ObjectId(id)}
+      const result=await coffeesCollection.findOne(filter)
+      res.send(result)
+    });
+    app.get('/my-coffees/:email',async(req,res)=>{
+      const  email=req.params.email
+      const filter={email:email}
+      const result=await coffeesCollection.find(filter).toArray()
+      res.send(result)
+    });
+    // 
+    app.patch('/like/:coffeeId',async(req,res)=>{
+  const id = req.params.coffeeId
+      const email = req.body.email
+      const filter = { _id: new ObjectId(id) }
+      const coffee = await coffeesCollection.findOne(filter)
+      // choke user have 
+      const alreadyLiked=coffee?.likedBy.includes(email);
+      const updateDoc = alreadyLiked
+        ? {
+            $pull: {
+              // dislike coffee (pop email from likedBy array)
+              likedBy: email,
+            },
+          }
+        : {
+            $addToSet: {
+              // Like coffee (push email in likedBy array)
+              likedBy: email,
+            },
+          }
+
+      await coffeesCollection.updateOne(filter, updateDoc)
+
+        res.send({
+        message: alreadyLiked ? 'Dislike Successful' : 'Like Successful',
+        liked: !alreadyLiked,
+      })
+    })
+app.post('/add-coffee',async(req,res)=>{
   const newCoffee=req.body ;
+  const quantity=newCoffee.quantity
+   // convert string quantity to number type value
+      newCoffee.quantity = parseInt(quantity)
   const result=await coffeesCollection.insertOne(newCoffee);
   res.send(result)
 });
+
+app.post('/place-order/:coffeeId',async(req,res)=>{
+  const id=req.params.coffeeId;
+  const orderData= req.body
+  const result=await orderCollection.insertOne(orderData);
+  if(result.acknowledged){
+    await coffeesCollection.updateOne({_id: new ObjectId(id)}
+    ,{ $inc:{
+      quantity:-1
+    }})
+  }
+res.send(result)
+});
+
+app.get('/my-orders/:email',async(req,res)=>{
+  const email=req.params.email;
+  const filter={customerEmail:email}
+  const allOrder=await  orderCollection.find(filter).toArray();
+
+  // for loop 
+  for(const order of allOrder){
+    const orderId=order.coffeeId ;
+    const fullCoffeeData= await coffeesCollection.findOne({_id: new ObjectId(orderId)})
+     order.name = fullCoffeeData.name
+        order.photo = fullCoffeeData.photo
+        order.price = fullCoffeeData.price
+        order.quantity = fullCoffeeData.quantity
+  }
+  res.send(allOrder)
+})
 app.put('/coffees/:id',async(req,res)=>{
   const id=req.params.id ;
   const filter={_id:new ObjectId(id)}
@@ -50,8 +120,19 @@ app.put('/coffees/:id',async(req,res)=>{
   }
   const result=await coffeesCollection.updateOne(filter,updateDoc);
   res.send(result);
+});
+app.delete('/cancleOrder/:id',async(req,res)=>{
+   const id=req.params.id 
+   const {coffeeId}= req.body
+  const query={_id: new ObjectId(id)}
+  const result=await orderCollection.deleteOne(query)
+  if(result.deletedCount){
+    await coffeesCollection.updateOne({_id:new ObjectId(coffeeId)},{$inc:{
+      quantity:+1
+    }})
+  }
+  res.send(result)
 })
-
 app.delete('/coffees/:id',async(req,res)=>{
   const id=req.params.id 
   const query={_id: new ObjectId(id)}
